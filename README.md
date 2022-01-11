@@ -52,8 +52,14 @@
         imgutils -P $image
     done
 
-> 保存镜像
+> 导出镜像
 
     for url in $(find ./ -type f |xargs grep 'image: '|sort|uniq|awk '{print $3}'|grep ^[a-zA-Z]|grep -Evw 'error|kubeRbacProxy'|sort -rn|awk -F/ '{print $1}'|uniq); do
         imgutils -S -d /mnt/kube-prometheus -r $url
+    done
+
+> 导入镜像
+
+    for file in $(ls /mnt/kube-prometheus/*); do
+        docker load -i $file
     done
