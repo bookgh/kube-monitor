@@ -20,6 +20,7 @@ function usage() {
     -S         to save local images to the disk (default '/tmp/docker/images')
     -d <dir>   change image directory (default '/tmp/docker/images')
     -r <str>   limit to images who's repo have a pattern <str>
+    -F         scp images remote server
 
 Example:
 $ ./imgutils -S -d /opt/docker/images -r gcr.io
@@ -98,8 +99,10 @@ function pull_any_image() {
       F1=$(echo "$1"|awk -F/ '{print $1}')
       F2=$(echo "$1"|awk -F/ '{print $2}')
       if [[ "$F1" == k8s.gcr.io ]];then
-        HUB="gcr.mirrors.ustc.edu.cn"
-        GRP="google-containers"
+        #HUB="gcr.mirrors.ustc.edu.cn"
+        #GRP="google-containers"
+        HUB="registry.cn-hangzhou.aliyuncs.com"
+        GRP="kube-monitor"
         IMG="$F2"
       else
         HUB="docker.mirrors.ustc.edu.cn"
@@ -139,6 +142,34 @@ function pull_any_image() {
   docker pull "$HUB/$GRP/$IMG" && \
   docker tag "$HUB/$GRP/$IMG" "$1" && \
   docker rmi "$HUB/$GRP/$IMG"
+  if [ $? -ne 0 ]; then
+    logger error "Image not found."
+    exit 1
+  fi
+
+  if [ -n $2 ]; then
+      img_scp $1 node
+  fi
+}
+
+function img_scp () {
+  local net=$2
+  local image=$1
+  name=$(echo "$image".tar|sed 's/\//_/g'|sed 's/:/_/g')
+  docker save -o "/mnt/${name}" "${image}"
+  logger info "Image save: $1 ."
+
+  img_id=$(docker images $1 | awk '{print $3}' | tail -n 1)
+  list_ip=$(cat /etc/hosts | grep ${net} | awk '{print $1}' | sort | uniq)
+  for host in ${list_ip}; do
+    ssh ${host} "docker images | grep -q $img_id"
+    if [ $? -ne 0 ]; then
+      logger info "Scp image: ${host} ${name} ."
+      scp /mnt/${name} ${host}:/mnt/${name} &>/dev/null
+      logger info "Load image: ${host} ${name} ."
+      ssh ${host} "docker load -i /mnt/${name}; rm -f /mnt/${name}"
+    fi
+  done
 }
 
 function main() {
@@ -153,7 +184,7 @@ function main() {
   export REPO_PATTERN=""
   export ACTION=""
 
-  while getopts "LP:Sd:r:" OPTION; do
+  while getopts "LP:F:Sd:r:" OPTION; do
       case "$OPTION" in
         L)
           ACTION="load_from_disk"
@@ -169,6 +200,9 @@ function main() {
           ;;
         r)
           export REPO_PATTERN="$OPTARG"
+          ;;
+        F)
+          ACTION="pull_any_image $OPTARG node"
           ;;
         ?)
           usage
